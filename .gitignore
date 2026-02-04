@@ -1,0 +1,21 @@
+/.venv/
+/__pycache__/
+/.cursor/
+
+# Python
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+
+# Databases and runtime data
+/asset_management/assets.db
+/asset_management/asset_management.db
+/asset_management/uploads/
+
+# OS / editor
+Thumbs.db
+desktop.ini
+.DS_Store
+
+
