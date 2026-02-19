@@ -1,4 +1,8 @@
--- Основные средства (данные из бухгалтерии)
+-- ============================================================
+-- Схема БД: Система учёта основных средств
+-- ============================================================
+
+-- Основные средства (данные из бухгалтерии / 1С)
 CREATE TABLE IF NOT EXISTS assets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     inventory_number VARCHAR(50) UNIQUE,
@@ -16,18 +20,26 @@ CREATE TABLE IF NOT EXISTS assets (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Местоположения
-CREATE TABLE IF NOT EXISTS locations (
+-- Фактическая инвентаризация (независимо от бухгалтерии, накопительная)
+CREATE TABLE IF NOT EXISTS fact_inventory (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    building VARCHAR(50),
-    floor VARCHAR(10),
-    room_number VARCHAR(20) NOT NULL,
-    room_name VARCHAR(100),
-    responsible_person VARCHAR(100),
-    is_active BOOLEAN DEFAULT 1
+    inventory_number VARCHAR(50),
+    name TEXT,
+    serial_number VARCHAR(100),
+    condition_status VARCHAR(50),
+    physical_label_status VARCHAR(50),
+    location TEXT,
+    ip_address VARCHAR(45),
+    notes TEXT,
+    source VARCHAR(20),
+    observed_date DATE,
+    matched_asset_id INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (matched_asset_id) REFERENCES assets(id) ON DELETE SET NULL
 );
 
--- Фактическое состояние
+-- Фактическое состояние (привязка к бух. объекту, 1:1)
 CREATE TABLE IF NOT EXISTS actual_assets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     asset_id INTEGER NOT NULL,
@@ -41,27 +53,10 @@ CREATE TABLE IF NOT EXISTS actual_assets (
     is_found BOOLEAN DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE,
-    FOREIGN KEY (location_id) REFERENCES locations(id)
-);
-
--- Расхождения
-CREATE TABLE IF NOT EXISTS discrepancies (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    asset_id INTEGER NOT NULL,
-    discrepancy_type VARCHAR(50) NOT NULL,
-    expected_value TEXT,
-    actual_value TEXT,
-    severity VARCHAR(20) DEFAULT 'MEDIUM',
-    status VARCHAR(20) DEFAULT 'NEW',
-    detected_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    resolved_date TIMESTAMP,
-    resolution_notes TEXT,
-    assigned_to VARCHAR(100),
     FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
 );
 
--- Расходники к оборудованию
+-- Расходники к оборудованию (картриджи, лампы и т.д.)
 CREATE TABLE IF NOT EXISTS equipment_consumables (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     parent_asset_id INTEGER NOT NULL,
@@ -93,122 +88,60 @@ CREATE TABLE IF NOT EXISTS incoming_goods (
     FOREIGN KEY (assigned_asset_id) REFERENCES assets(id)
 );
 
--- Дефекты и неисправности
-CREATE TABLE IF NOT EXISTS defects (
+-- История изменений (расширенная)
+CREATE TABLE IF NOT EXISTS change_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    asset_id INTEGER NOT NULL,
-    reported_date DATE NOT NULL,
-    reported_by VARCHAR(100),
-    defect_description TEXT NOT NULL,
-    defect_type VARCHAR(50),
-    priority VARCHAR(20) DEFAULT 'MEDIUM',
-    status VARCHAR(50) DEFAULT 'OPEN',
-    repair_date DATE,
-    repair_notes TEXT,
-    repair_cost DECIMAL(10,2),
-    repaired_by VARCHAR(100),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
-);
-
--- История перемещений
-CREATE TABLE IF NOT EXISTS movement_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    asset_id INTEGER NOT NULL,
-    from_location_id INTEGER,
-    to_location_id INTEGER NOT NULL,
-    movement_date DATE NOT NULL,
+    entity_type TEXT NOT NULL,
+    entity_id INTEGER NOT NULL,
+    field_changed TEXT NOT NULL,
+    old_value TEXT,
+    new_value TEXT,
+    changed_by TEXT DEFAULT 'user',
     reason TEXT,
-    moved_by VARCHAR(100),
-    approved_by VARCHAR(100),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE,
-    FOREIGN KEY (from_location_id) REFERENCES locations(id),
-    FOREIGN KEY (to_location_id) REFERENCES locations(id)
+    changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Лог импорта
-CREATE TABLE IF NOT EXISTS import_log (
+-- Местоположения (справочник)
+CREATE TABLE IF NOT EXISTS locations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    import_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    file_name VARCHAR(255),
-    records_imported INTEGER DEFAULT 0,
-    records_updated INTEGER DEFAULT 0,
-    records_new INTEGER DEFAULT 0,
-    errors_count INTEGER DEFAULT 0,
-    error_log TEXT,
-    imported_by VARCHAR(100)
+    building VARCHAR(50),
+    floor VARCHAR(10),
+    room_number VARCHAR(20) NOT NULL,
+    room_name VARCHAR(100),
+    responsible_person VARCHAR(100),
+    is_active BOOLEAN DEFAULT 1
 );
 
--- Пользователи
-CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username VARCHAR(50) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
-    full_name VARCHAR(100),
-    email VARCHAR(100),
-    role VARCHAR(20) DEFAULT 'VIEWER',
-    is_active BOOLEAN DEFAULT 1,
-    last_login TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Индексы для ускорения поиска
+-- ============================================================
+-- Индексы
+-- ============================================================
 CREATE INDEX IF NOT EXISTS idx_assets_inventory ON assets(inventory_number);
 CREATE INDEX IF NOT EXISTS idx_assets_category ON assets(category);
 CREATE INDEX IF NOT EXISTS idx_actual_assets_asset_id ON actual_assets(asset_id);
-CREATE INDEX IF NOT EXISTS idx_actual_assets_location_id ON actual_assets(location_id);
-CREATE INDEX IF NOT EXISTS idx_discrepancies_asset_id ON discrepancies(asset_id);
-CREATE INDEX IF NOT EXISTS idx_discrepancies_status ON discrepancies(status);
-CREATE INDEX IF NOT EXISTS idx_defects_asset_id ON defects(asset_id);
-CREATE INDEX IF NOT EXISTS idx_defects_status ON defects(status);
+CREATE INDEX IF NOT EXISTS idx_fact_inventory_inv ON fact_inventory(inventory_number);
+CREATE INDEX IF NOT EXISTS idx_fact_inventory_serial ON fact_inventory(serial_number);
+CREATE INDEX IF NOT EXISTS idx_fact_inventory_matched ON fact_inventory(matched_asset_id);
+CREATE INDEX IF NOT EXISTS idx_change_history_entity ON change_history(entity_type, entity_id);
 
--- Триггер для автоматического обновления updated_at
+-- ============================================================
+-- Триггеры автообновления updated_at
+-- ============================================================
 CREATE TRIGGER IF NOT EXISTS update_assets_timestamp
-AFTER UPDATE ON assets
-BEGIN
+AFTER UPDATE ON assets BEGIN
     UPDATE assets SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
 END;
 
 CREATE TRIGGER IF NOT EXISTS update_actual_assets_timestamp
-AFTER UPDATE ON actual_assets
-BEGIN
+AFTER UPDATE ON actual_assets BEGIN
     UPDATE actual_assets SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
 END;
 
--- Фактическая инвентаризация (независимо от бухгалтерии)
-CREATE TABLE IF NOT EXISTS fact_inventory (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    inventory_number VARCHAR(50),
-    name TEXT,
-    serial_number VARCHAR(100),
-    condition_status VARCHAR(50),
-    physical_label_status VARCHAR(50),
-    location TEXT,
-    notes TEXT,
-    source VARCHAR(20), -- manual/import
-    observed_date DATE, -- когда зафиксировано
-    matched_asset_id INTEGER, -- явное сопоставление с assets
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (matched_asset_id) REFERENCES assets(id) ON DELETE SET NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_fact_inventory_inv ON fact_inventory(inventory_number);
-CREATE INDEX IF NOT EXISTS idx_fact_inventory_serial ON fact_inventory(serial_number);
-CREATE INDEX IF NOT EXISTS idx_fact_inventory_matched ON fact_inventory(matched_asset_id);
-
 CREATE TRIGGER IF NOT EXISTS update_fact_inventory_timestamp
-AFTER UPDATE ON fact_inventory
-BEGIN
+AFTER UPDATE ON fact_inventory BEGIN
     UPDATE fact_inventory SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
 END;
--- Вставка дефолтного администратора (admin / admin123)
-INSERT OR IGNORE INTO users (username, password_hash, full_name, role)
-VALUES ('admin', 'pbkdf2:sha256:260000$salt$hash', 'Администратор', 'ADMIN');
 
--- Пример локаций
+-- Начальные данные
 INSERT OR IGNORE INTO locations (building, floor, room_number, room_name) VALUES
 ('Главный корпус', '1', '101', 'Бухгалтерия'),
 ('Главный корпус', '1', '102', 'Отдел кадров'),
